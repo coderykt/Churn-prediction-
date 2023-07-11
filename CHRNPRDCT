@@ -1,0 +1,208 @@
+import pandas as pd
+import numpy as np
+from datetime import date
+from datetime import datetime
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+import random
+
+def abs_day(x):
+    x = str(x)
+    if len(x)>9:
+        return (int(x[:4])-2019)*365 + int(x[5:7])*30 + int(x[8:10])
+    else:
+        return -1 
+
+   
+df = pd.read_csv('/kaggle/input/ecommerce-purchase-history-from-electronics-store/kz.csv',
+                dtype={'user_id': str, 
+                      'order_id': str, 
+                      'product_id': str, 
+                      'category_id':str
+                      })
+
+df['absolute_day'] = df['event_time'].apply(abs_day).astype(int)# добавление столбца absolute day 
+
+print(len(df))
+df = df[df['event_time']>'2000-01-01']
+print(df['event_time'].max())
+print(df['event_time'].min())
+print(len(df))
+print(len(df['user_id'].unique()))
+
+pd.set_option('display.max_columns', 100)
+print('brand count', len(df['brand'].unique()))
+print('top 50 brand')
+histogram = df['brand'].value_counts()
+histogram = histogram[:50]
+brands = [brand for brand  in list(histogram.index) if brand != 'none']
+df.loc[~df['brand'].isin(brands),'brand'] = 'none'
+histogram = df['brand'].value_counts()
+enumeration = dict(zip(histogram.index, range(len(histogram))))
+df['brand'] = df['brand'].replace(enumeration)
+
+print('category_code', len(df['category_code'].unique()))
+print('top 50 category codes')
+histogram = df['category_code'].value_counts()
+histogram = histogram[:50]
+brands = [brand for brand  in list(histogram.index) if brand != 'none']
+df.loc[~df['category_code'].isin(brands),'category_code'] = 'none'
+histogram = df['category_code'].value_counts()
+enumeration = dict(zip(histogram.index, range(len(histogram))))
+df['category_code'] = df['category_code'].replace(enumeration)
+
+pd.set_option('display.max_columns', 100)
+print('customer activity')
+print('top 30')
+print(df['user_id'].value_counts()[:30])# топ 30 пользователей и количество их активностей 
+print('median customer')
+histogram = df['user_id'].value_counts()
+histogram = histogram[(histogram>=3)] # фильтрует histogram где потльзователь проявил активность три и более раза
+histogram.hist(bins=17)# рисует гистограмму 
+len(histogram.index) # количество пользователей совершивших активность 3 и более раза
+
+print(61162, len(df))
+df = df[df['user_id'].isin(histogram.index)] # оставляет в df пользователей которые были активны 3 и более раза
+print(len(df)) # почему то не равно 61162       
+
+df = df.sort_values(by=['user_id','event_time']) # сортирует пользователей из df по убывающему event_time
+# distances = []
+
+results = []
+users = df['user_id'].unique()
+df['absolute_day'] = df['absolute_day'].astype(int)
+for user in tqdm(users):
+    small_df = df[df['user_id']==user]
+    start_day = small_df['absolute_day'].min()
+    last_day = small_df['absolute_day'].max()
+    if last_day > 670:
+        last_day = 670
+    for iteration in range((last_day-start_day)//100):
+        check_day = random.randint(max(30, start_day), last_day)
+        month_df = small_df[(check_day-30<small_df['absolute_day'])&(small_df['absolute_day']<=check_day)]
+        month_buys = len(month_df)
+        if month_buys>0:
+            month_amount = month_df['price'].sum()
+            month_check = month_amount / month_buys
+            month_brand_mode = month_df['brand'].mode().iloc[0]
+            month_brand_last = month_df.iloc[-1, month_df.columns.get_loc('brand')]
+            month_category_mode = month_df['category_code'].mode().iloc[0]
+            month_category_last = month_df.iloc[-1, month_df.columns.get_loc('category_code')]        
+        else:     
+            month_amount = 0
+            month_check = 0
+            month_brand_mode = -1
+            month_brand_last = -1
+            month_category_mode = -1
+            month_category_last = -1        
+        
+        week_df = small_df[(check_day-7<small_df['absolute_day'])&(small_df['absolute_day']<=check_day)]
+        week_buys = len(week_df)
+        week_amount = week_df['price'].sum()
+        if week_buys > 0:
+            week_check = week_amount / week_buys
+        else:
+            week_check = 0
+    
+        week2_df = small_df[(check_day-14<small_df['absolute_day'])&(small_df['absolute_day']<=check_day)]
+        week2_buys = len(week2_df)
+        week2_amount = week2_df['price'].sum()
+        if week2_buys > 0:
+            week2_check = week2_amount / week2_buys
+        else:
+            week2_check = 0
+        churn_df = small_df[(check_day<small_df['absolute_day'])&(small_df['absolute_day']<=check_day+30)]
+        if len(churn_df) > 0:
+            churn = 0
+        else:
+            churn = 1
+            
+        results.append({'user_id':user,'week_buys':week_buys,'week_amount':week_amount,
+                    'week_check':week_check,'week2_buys':week2_buys,'week2_amount':week2_amount,
+                    'week2_check':week2_check,'month_buys':month_buys,'month_amount':month_amount,
+                    'month_check':month_check,
+                    'month_category_last':month_category_last,
+                    'month_category_mode':month_category_mode,
+                    'month_brand_last':month_brand_last,
+                    'month_brand_mode':month_brand_mode,
+                        'churn': churn})
+    
+mf = pd.DataFrame.from_dict(results)    
+mf.to_csv('train.csv', index=False)
+
+mf = pd.read_csv('/kaggle/input/train1/train (1).csv', dtype={'user_id': str, 
+                      'order_id': str, 
+                      'product_id': str, 
+                      'category_id':str
+                      })[:-1] # новый dataframe "mf" с оттоком пользователей,информацией о покупках и тд,отток = неактивность пользователя 30 дней
+#print('Проверка уникальности, количество пользователей, ',[len(mf['user_id'].unique()),len(mf)]) # уникальные пользователи и общее количество
+print('Количество ушедших пользователей ', mf['churn'].sum())
+print('Количество оставшихся пользователей', len(mf) - mf['churn'].sum())
+print('Процент оставшихся пользователей', round(100*(len(mf) - mf['churn'].sum())/len(mf),2),'%')
+
+###### from sklearn.model_selection import train_test_split
+import xgboost as xgb
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix
+
+X_train, X_test, y_train, y_test = train_test_split( #Эта строка разбивает функции и целевые данные на наборы для обучения и тестирования.
+    mf[[ 'week_buys', 'week_amount', 'week_check', 'week2_buys',
+       'week2_amount', 'week2_check', 'month_buys', 'month_amount',
+       'month_check', 'month_category_last','month_category_mode', 
+       'month_brand_last','month_brand_mode']], mf[['churn']], stratify = mf[['churn']], random_state=3)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    mf[[ 'week_buys', 'week_amount', 'week_check', 'week2_buys',
+       'week2_amount', 'week2_check', 'month_buys', 'month_amount',
+       'month_check', 'month_category_last','month_category_mode', 
+       'month_brand_last','month_brand_mode']], mf[['churn']], stratify = mf[['churn']], random_state=3)
+
+# Init classifier
+model = xgb.XGBClassifier(scale_pos_weight=0.55, #Вес положительного класса
+                         max_depth=3, #максимальная глубина дерева
+                         n_estimators=10000) #количество базовых моделей, которые будут использоваться
+
+# Fit
+eval_set = [(X_test, y_test)] #Эта строка создает оценочный набор для ранней остановки во время обучения модели.
+model.fit(X_train, y_train, early_stopping_rounds=4,  
+          eval_metric="error", eval_set=eval_set, verbose=True)
+#model.fit(X_train, y_train, early_stopping_rounds=4, eval_metric="error", eval_set=eval_set, verbose=True) Эта строка подгоняет модель XGBoost к обучающим данным.
+#early_stopping_rounds Параметр останавливает тренировку, если производительность не улучшается после 4 раундов.
+#eval_metric = "error" установлено значение «ошибка», чтобы оценить частоту ошибок модели.
+#eval_set=eval_set используется для ранней остановки
+#verbose=True отображает ход обучения.
+
+# Predict
+prediction = model.predict(X_test) # Эта строка использует обученную модель для прогнозирования функций тестирования.
+print(accuracy_score(y_test, prediction)) #Он вычисляет и печатает показатель точности, сравнивая предсказанные метки (prediction) с истинными метками (y_test).
+print(confusion_matrix(y_test, prediction))#Эта строка вычисляет и печатает матрицу путем сравнения предсказанных меток (prediction) с истинными метками (y_test).
+
+prediction = model.predict(X_train)# Эта строка использует обученную модель для прогнозирования функций обучения.
+print(accuracy_score(y_train, prediction))#Он вычисляет и печатает оценку точности обучающего набора, сравнивая предсказанные метки (прогноз) с истинными метками (y_train).
+print(confusion_matrix(y_train, prediction)) 
+
+# Predict
+prediction = model.predict(X_test)
+print(accuracy_score(y_test, prediction))
+print(confusion_matrix(y_test, prediction))
+tn, fp, fn, tp = confusion_matrix(y_test, prediction).ravel()
+# tp "верно предсказан уход клиента"
+# tn "верно предсказана лояльность клиента"
+# fp "неверный прогноз об уходе клиента"
+# fn "неверный прогноз о лояльности клиента"
+print('recall', tp/(tp+fn)) #Он измеряет точность выявления предикты уходящих пользователей.полнота
+print('precision', tp/(tp+fp)) #Он измеряет точность модели в прогнозировании случаев оттока среди положительных прогнозов. точность 
+print('изменение прибыли компании', (1000*(tp * 0.035 - fp * 0.05)))# положительный 
+print('tp',tp,"верно предсказан уход клиента")
+print('tn',tn, "верно предсказана лояльность клиента")
+print('fn',fn, "неверый прогноз о лояльности клиента")
+print('fp',fp, "неверный прогноз об уходе клиента") #y test true y prediction 
+
+X_train, X_test, y_train, y_test = train_test_split(
+    mf[[ 'week_buys', 'week_amount', 'week_check', 'week2_buys',
+       'week2_amount', 'week2_check', 'month_buys', 'month_amount',
+       'month_check', 'month_category_last', 'month_category_mode',
+       'month_brand_last','month_brand_mode']], mf[['churn']], stratify = mf[['churn']], random_state=3)
